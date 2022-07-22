@@ -1,99 +1,102 @@
 import uuid
 import rospy
+import json
 
 from common_srvs.srv import QuestionAnswer, QuestionAnswerRequest
 
-def call_service(srv_name, srv_type, request):
-    rospy.wait_for_service(srv_name)
-    # try:
-    service_proxy = rospy.ServiceProxy(srv_name, srv_type)
-    resp1 = service_proxy(request)
-    # except rospy.ServiceException as e:
-    #     print("Service call failed: %s"%e)
-    return resp1
+class ConnectionHandler(object):
+    """ Object for keeping track of """
+    def __init__(self, verbose=0):
+        self.connected_server = None
+        self.verbose = verbose
 
-class LeWidget(object):
-    def __init__(self):
-        self.name = ""
-        self.uid = uuid.uuid4()
+    def send_and_receive(self, channel, data):
+        response = self.call_service(channel, QuestionAnswer, QuestionAnswerRequest(data))
+        if response is None:
+            return None
+        return response.answer
 
-class LeButton(LeWidget):
-    def __init__(self):
-        super(LeButton, self).__init__()
-        response = call_service('add_button', QuestionAnswer, QuestionAnswerRequest(str(self.uid)))
+    def call_service(self, srv_name, srv_type, request):
+        try:
+            rospy.wait_for_service(srv_name, timeout=1.)
+        except rospy.ROSException:
+            if self.connected_server is not None:
+                if self.verbose > 0: 
+                    print("Server disconnected")
+            self.connected_server = None
+            return None
+        if self.connected_server is None:
+            self.connected_server = "unknown"
+            if self.verbose > 0: 
+                print("Connected to server {}".format(self.connected_server))
+        # try:
+        service_proxy = rospy.ServiceProxy(srv_name, srv_type)
+        resp1 = service_proxy(request)
+        # except rospy.ServiceException as e:
+        #     print("Service call failed: %s"%e)
+        return resp1
+
+
+class LeWidgetClient(object):
+    def __init__(self, button_response, connection_handler):
+        self.uid = button_response["uid"]
+        self.label = button_response["label"]
+        self.connection_handler = connection_handler
+
+class LeButtonClient(LeWidgetClient):
+    def __init__(self, button_response, connection_handler):
+        super(LeButtonClient, self).__init__(button_response, connection_handler)
         
     def on_click(self, func, args=None, kwargs=None):
         # set up a rosservice for calling the callback when the button is pressed
         raise NotImplementedError
 
     def is_clicked(self):
-        response = call_service('is_button_clicked', QuestionAnswer, QuestionAnswerRequest(str(self.uid)))
-        if response.answer == "true":
+        resp_str = self.connection_handler.send_and_receive('is_button_clicked', str(self.uid))
+        if resp_str == "true":
             return True
+        return False
 
-
-class LeGUI(object):
-    def __init__(self, path=None):
-        # starts pyqt5 app in separate thread
-        self.widgets = []
-        pass
-
-    def find_widget(self, idx, name, type_):
-        count = 0
-        for widget in self.widgets:
-            match_idx = idx is None or idx == count
-            match_name = name is None or name == widget.name
-            match_type = isinstance(widget, type_)
-            if match_idx and match_name and match_type:
-                return widget
-            if match_type:
-                count += 1
+class NotFoundButton(object):
+    def is_clicked(self):
         return None
 
-    def get_button(self, idx=None, name=None):
-        button = self.find_widget(idx=idx, name=name, type_=LeButton)
-        if button is None:
-            print("Creating button")
-            button = LeButton()
-            self.widgets.append(button)
+class LeGUI(object):
+    def __init__(self, path=None, verbose=0):
+        # TODO starts pyqt5 app in separate thread
+        self.verbose = verbose
+        self.connection_handler = ConnectionHandler(verbose=verbose)
+
+    def get_button(self, idx=None, name=None, uid=None):
+        button_query = {"idx": idx, "name": name, "uid": uid, "typestr": "LeButton"}
+        button_query_json = json.dumps(button_query)
+        resp_str = self.connection_handler.send_and_receive('get_widget', button_query_json)
+        if resp_str is None:
+            if self.verbose > 0:
+                print("No LeGUI server found when getting button")
+            return NotFoundButton()
+        button_response = json.loads(resp_str)
+        # If a button isn't found it will be created, unless a uid was specified
+        if not button_response["is_found"]:
+            if self.verbose > 0:
+                print("Requested button not found")
+            return NotFoundButton()
+        button = LeButtonClient(button_response, self.connection_handler)
+        # print("found button {}".format(button.uid))
         return button
-
-#     # we can connect buttons to callbacks which are run immediately when the button is clicked.
-# def do_something():
-#     print("Click!")
-# G.get_button(idx=0).on_click(do_something)
-
-# sequence = []
-# for i in range(100):
-#     # checks the status of the first toggle created in the live GUI. (If there isn't one yet, it will be created)
-#     if G.get_toggle(idx=0).is_enabled():
-#         print("toggle is enabled")
-#         sequence.append(1)
-#     else:
-#         print("toggle is disabled")
-#         sequence.append(0)
-
-#     # gets the first button created in the live GUI. (If there isn't one yet, it will be created)
-#     if G.get_button(idx=0).is_clicked():
-#         print("button was clicked recently.")
-
-#     # gets the first axes created in the live GUI. (if they don't exist, creates an axes widget)
-#     ax = G.get_axes(idx=0)
-#     ax.plot(sequence)
-
-#     time.sleep(1.0)
 
 if __name__ == "__main__":
     import time
 
-    G = LeGUI()
+    G = LeGUI(verbose=1)
     G.get_button(idx=0).is_clicked()
 
     for i in range(100):
 
         # gets the first button created in the live GUI. (If there isn't one yet, it will be created)
-        if G.get_button(idx=0).is_clicked():
-            print("button was clicked recently.")
+        B = G.get_button(idx=0)
+        if B.is_clicked():
+            print("button {} was clicked recently.".format(B.label))
 
         time.sleep(1.0)
     
