@@ -1,6 +1,7 @@
 # TODO: click to add button
 from plistlib import UID
 import sys
+from this import d
 import time
 import uuid
 import json
@@ -11,7 +12,7 @@ from matplotlib import widgets
 matplotlib.use('Qt5Agg')
 
 from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import QWidget, QPushButton, QMainWindow, QLabel, QSlider, QCheckBox
+from PyQt5.QtWidgets import QWidget, QPushButton, QMainWindow, QLabel, QSlider, QCheckBox, QLineEdit
 from PyQt5.QtWidgets import QVBoxLayout, QHBoxLayout
 from PyQt5.QtWidgets import QMenu
 from PyQt5.QtWidgets import QInputDialog
@@ -45,8 +46,9 @@ class LeLayout(QWidget):
         addBtnAct = contextMenu.addAction("Add Button")
         addPPlotAct = contextMenu.addAction("Add Pyplot")
         addCheckboxAct = contextMenu.addAction("Add Checkbox")
+        addValueAct = contextMenu.addAction("Add Value")
         addSliderAct = contextMenu.addAction("Add Slider")
-        addLabelAct = contextMenu.addAction("Add Label")
+        addTextFieldAct = contextMenu.addAction("Add TextField")
         addVBoxAct = contextMenu.addAction("Add Vertical Layout")
         addHBoxAct = contextMenu.addAction("Add Horizontal Layout")
         rmSelfAct = contextMenu.addAction("Delete Layout")
@@ -63,8 +65,10 @@ class LeLayout(QWidget):
             self.addLeWidget(LeCheckBox, uid=None)
         if action == addSliderAct:
             self.addLeWidget(LeSlider, uid=None)
-        if action == addLabelAct:
-            self.addLeWidget(LeLabel, uid=None)
+        if action == addTextFieldAct:
+            self.addLeWidget(LeTextField, uid=None)
+        if action == addValueAct:
+            self.addLeWidget(LeValue, uid=None)
         if action == rmSelfAct:
             self.parent.removeLeWidget(self)
 
@@ -74,7 +78,7 @@ class LeLayout(QWidget):
         lewidget = type_(uid, '{} {}'.format(type_.__name__, self.leguiserver.count_widgets(type_=type_)), self, self.leguiserver)
         self.leguiserver.all_editable_widgets.append(lewidget)
         self.lewidgets.append(lewidget)
-        self.layout().addWidget(lewidget)
+        self.layout().addWidget(lewidget.get_qwidget())
         return lewidget
 
     def removeLeWidget(self, lewidget):
@@ -95,6 +99,9 @@ class LeLayout(QWidget):
     
     def get_depth(self):
         return self.parent.get_depth() + 1
+
+    def get_qwidget(self):
+        return self
 
     def set_label(self, label):
         self.labelwidget = QLabel(text=label)
@@ -159,38 +166,59 @@ class LeHBox(LeLayout):
         
         print("New Layout, depth {}".format(self.get_depth()))
         self.set_label(label)
-        self.set_color(LeLayout.DEPTH_COLORS[self.get_depth()])       
+        self.set_color(LeLayout.DEPTH_COLORS[self.get_depth()])    
 
-class LeButton(QPushButton):
+class LeWidget(object):
     def __init__(self, uid, label, parent, leguiserver):
-        icon = None
-        super(LeButton, self).__init__() 
+        self.create_qwidget()
         self.leguiserver = leguiserver
         self.parent = parent
         self.uid = uid
         self.set_label(label)
-        # Button specific
-        self.was_clicked = False
+        self.get_qwidget().contextMenuEvent = self.contextMenuEvent
 
     def contextMenuEvent(self, event):
-        contextMenu = QMenu(self)
+        contextMenu = QMenu(self.get_qwidget())
+        empty = contextMenu.addAction(self.get_label())
         deleteAct = contextMenu.addAction("Delete")
         settextAct = contextMenu.addAction("Set Label")
-        action = contextMenu.exec_(self.mapToGlobal(event.pos()))
+        action = contextMenu.exec_(self.get_qwidget().mapToGlobal(event.pos()))
         if action == deleteAct:
             self.parent.removeLeWidget(self)
         if action == settextAct:
-            text, ok = QInputDialog.getText(self, 'Text Input Dialog', 'Enter new label:')
+            text, ok = QInputDialog.getText(self.get_qwidget(), 'Text Input Dialog', 'Enter new label:')
             if ok:
                 self.set_label(text)
     
+    def create_qwidget(self):
+        raise NotImplementedError
+
+    def get_qwidget(self):
+        raise NotImplementedError
+
     def get_label(self):
-        return self.text()
+        raise NotImplementedError
 
     def set_label(self, label):
-        self.setText(label)
+        raise NotImplementedError
 
-    # Button specific methods
+    def close(self):
+        self.get_qwidget().close()
+
+class LeButton(LeWidget):
+    def create_qwidget(self):
+        self.qwidget = QPushButton()
+        self.was_clicked = False
+
+    def get_qwidget(self):
+        return self.qwidget
+
+    def get_label(self):
+        return self.qwidget.text()
+
+    def set_label(self, label):
+        self.qwidget.setText(label)
+
     def on_click(self):
         self.was_clicked = True
 
@@ -199,28 +227,14 @@ class LeButton(QPushButton):
         self.was_clicked = False
         return status
 
-class LePyplot(FigureCanvasQTAgg):
-    def __init__(self, uid, label, parent, leguiserver, width=5, height=4, dpi=100):
-        fig = Figure(figsize=(width, height), dpi=dpi)
+class LePyplot(LeWidget):
+    def create_qwidget(self):
+        fig = Figure(figsize=(5, 4), dpi=100)
         self.axes = fig.add_subplot(111)
-        super(LePyplot, self).__init__(fig)
-        # LeWidget generic init
-        self.leguiserver = leguiserver
-        self.parent = parent
-        self.uid = uid
-        self.set_label(label)
+        self.qwidget = FigureCanvasQTAgg(fig)
 
-    def contextMenuEvent(self, event):
-        contextMenu = QMenu(self)
-        deleteAct = contextMenu.addAction("Delete")
-        settextAct = contextMenu.addAction("Set Label")
-        action = contextMenu.exec_(self.mapToGlobal(event.pos()))
-        if action == deleteAct:
-            self.parent.removeLeWidget(self)
-        if action == settextAct:
-            text, ok = QInputDialog.getText(self, 'Text Input Dialog', 'Enter new label:')
-            if ok:
-                self.set_label(text)
+    def get_qwidget(self):
+        return self.qwidget
     
     def get_label(self):
         return self.axes.get_title()
@@ -229,83 +243,107 @@ class LePyplot(FigureCanvasQTAgg):
         self.axes.set_title(label)
 
 
-class LeCheckBox(QCheckBox):
-    def __init__(self, uid, label, parent, leguiserver):
-        super(LeCheckBox, self).__init__()
-        self.leguiserver = leguiserver
-        self.parent = parent
-        self.uid = uid
-        self.set_label(label)
+class LeCheckBox(LeWidget):
+    def create_qwidget(self):
+        self.qwidget = QCheckBox()
 
-    def contextMenuEvent(self, event):
-        contextMenu = QMenu(self)
-        deleteAct = contextMenu.addAction("Delete")
-        settextAct = contextMenu.addAction("Set Label")
-        action = contextMenu.exec_(self.mapToGlobal(event.pos()))
-        if action == deleteAct:
-            self.parent.removeLeWidget(self)
-        if action == settextAct:
-            text, ok = QInputDialog.getText(self, 'Text Input Dialog', 'Enter new label:')
-            if ok:
-                self.set_label(text)
+    def get_qwidget(self):
+        return self.qwidget
     
     def get_label(self):
-        return self.text()
+        return self.qwidget.text()
 
     def set_label(self, label):
-        self.setText(label)
+        self.qwidget.setText(label)
 
-class LeLabel(QLabel):
-    def __init__(self, uid, label, parent, leguiserver):
-        super(LeLabel, self).__init__()
-        self.leguiserver = leguiserver
-        self.parent = parent
-        self.uid = uid
-        self.set_label(label)
+class LeValue(LeWidget):
+    def create_qwidget(self):
+        self.qwidget = QWidget()
+        self.qwidget.setLayout(QHBoxLayout())
+        self.labelqwidget = QLabel()
+        self.valueqwidget = QLabel(text="None")
+        self.qwidget.layout().addWidget(self.labelqwidget)
+        self.qwidget.layout().addWidget(QLabel(text=":"))
+        self.qwidget.layout().addWidget(self.valueqwidget)
 
-    def contextMenuEvent(self, event):
-        contextMenu = QMenu(self)
-        deleteAct = contextMenu.addAction("Delete")
-        settextAct = contextMenu.addAction("Set Label")
-        action = contextMenu.exec_(self.mapToGlobal(event.pos()))
-        if action == deleteAct:
-            self.parent.removeLeWidget(self)
-        if action == settextAct:
-            text, ok = QInputDialog.getText(self, 'Text Input Dialog', 'Enter new label:')
-            if ok:
-                self.set_label(text)
+    def get_qwidget(self):
+        return self.qwidget
     
     def get_label(self):
-        return self.text()
+        return self.labelqwidget.text()
 
     def set_label(self, label):
-        self.setText(label)
+        self.labelqwidget.setText(label)
 
-class LeSlider(QSlider):
-    def __init__(self, uid, label, parent, leguiserver):
-        super(LeSlider, self).__init__()
-        self.leguiserver = leguiserver
-        self.parent = parent
-        self.uid = uid
-        self.set_label(label)
+class LeSlider(LeWidget):
+    def create_qwidget(self):
+        self.qwidget = QWidget()
+        self.qwidget.setLayout(QHBoxLayout())
+        self.labelqwidget = QLabel()
+        self.sliderqwidget = QSlider()
+        show_value_qwidget = QLabel()
+        self.sliderqwidget.valueChanged.connect(lambda: show_value_qwidget.setText(str(self.get_value())))
+        self.show_min_qwidget = QLabel()
+        self.show_max_qwidget = QLabel()
+        slider_layout = QWidget()
+        slider_layout.setLayout(QVBoxLayout())
+        slider_layout.layout().addWidget(self.show_max_qwidget)
+        slider_layout.layout().addWidget(self.sliderqwidget)
+        slider_layout.layout().addWidget(self.show_min_qwidget)
+        self.qwidget.layout().addWidget(self.labelqwidget)
+        self.qwidget.layout().addWidget(QLabel(text=":"))
+        self.qwidget.layout().addWidget(show_value_qwidget)
+        self.qwidget.layout().addWidget(slider_layout)
+        self.n_ticks = 100
+        self.set_minimum(0.)
+        self.set_maximum(1.)
+        self.sliderqwidget.setMinimum(0)
+        self.sliderqwidget.setMaximum(self.n_ticks)
+        show_value_qwidget.setText(str(self.get_value()))
 
-    def contextMenuEvent(self, event):
-        contextMenu = QMenu(self)
-        deleteAct = contextMenu.addAction("Delete")
-        settextAct = contextMenu.addAction("Set Label")
-        action = contextMenu.exec_(self.mapToGlobal(event.pos()))
-        if action == deleteAct:
-            self.parent.removeLeWidget(self)
-        if action == settextAct:
-            text, ok = QInputDialog.getText(self, 'Text Input Dialog', 'Enter new label:')
-            if ok:
-                self.set_label(text)
+
+    def get_qwidget(self):
+        return self.qwidget
     
     def get_label(self):
-        return self.label
+        return self.labelqwidget.text()
 
     def set_label(self, label):
-        self.label = label
+        self.labelqwidget.setText(label)
+
+    def set_minimum(self, min):
+        self.min = min
+        self.show_min_qwidget.setText(str(min))
+
+    def set_maximum(self, max):
+        self.max = max
+        self.show_max_qwidget.setText(str(max))
+    
+    def set_n_ticks(self, n):
+        self.n_ticks = n
+        self.sliderqwidget.setMaximum(n)
+    
+    def get_value(self):
+        return self.sliderqwidget.value() * 1.0 / self.n_ticks * (self.max - self.min) + self.min
+
+
+class LeTextField(LeWidget):
+    def create_qwidget(self):
+        self.qwidget = QWidget()
+        self.qwidget.setLayout(QHBoxLayout())
+        self.labelqwidget = QLabel()
+        self.fieldqwidget = QLineEdit()
+        self.qwidget.layout().addWidget(self.labelqwidget)
+        self.qwidget.layout().addWidget(self.fieldqwidget)
+
+    def get_qwidget(self):
+        return self.qwidget
+
+    def get_label(self):
+        return self.labelqwidget.text()
+
+    def set_label(self, label):
+        self.labelqwidget.setText(label)
 
 class LeGUIServer(object):
     def __init__(self, path=None):
@@ -336,9 +374,10 @@ class LeGUIServer(object):
             editable = self.mainlayout.addLeWidget(LeVBox)
             editable.addLeWidget(LeButton)
             editable.addLeWidget(LeButton)
-            editable.addLeWidget(LeSlider)
             editable.addLeWidget(LeCheckBox)
-            editable.addLeWidget(LeLabel)
+            editable.addLeWidget(LeValue)
+            editable.addLeWidget(LeSlider)
+            editable.addLeWidget(LeTextField)
             self.currently_selected_editablevbox = editable
 
             editable2 = self.mainlayout.addLeWidget(LeVBox)
