@@ -72,6 +72,12 @@ class LeLayout(QWidget):
         if action == rmSelfAct:
             self.parent.removeLeWidget(self)
 
+    def get_currently_selected_layout(self):
+        for lewidget in self.lewidgets[::-1]:
+            if isinstance(lewidget, LeLayout):
+                return lewidget.get_currently_selected_layout()
+        return self
+
     def addLeWidget(self, type_, uid=None):
         if uid is None:
             uid = str(uuid.uuid4())
@@ -128,6 +134,15 @@ class LeMainLayout(LeLayout):
         palette = self.palette()
         palette.setColor(QPalette.Window, QColor("white"))
         self.setPalette(palette)
+
+    def addLeWidget(self, type_, uid=None):
+        # if type is not a LeLayout, and we don't have any children layouts, create one
+        if not issubclass(type_, LeLayout):
+            surrogate_layout = self.get_currently_selected_layout()
+            if surrogate_layout == self:
+                surrogate_layout = self.addLeWidget(LeVBox, uid=None)
+            return surrogate_layout.addLeWidget(type_, uid=uid)
+        return super(LeMainLayout, self).addLeWidget(type_, uid=uid)
 
     def contextMenuEvent(self, event):
         contextMenu = QMenu(self)
@@ -208,6 +223,7 @@ class LeWidget(object):
 class LeButton(LeWidget):
     def create_qwidget(self):
         self.qwidget = QPushButton()
+        self.qwidget.clicked.connect(self.on_click)
         self.was_clicked = False
 
     def get_qwidget(self):
@@ -351,7 +367,6 @@ class LeGUIServer(object):
         self.all_editable_widgets = []
         self.message_queue = []
         self.edit_mode_enabled = False
-        self.currently_selected_editablevbox = None
         
         # Create and populate main window
         app = QtWidgets.QApplication(sys.argv)
@@ -378,7 +393,6 @@ class LeGUIServer(object):
             editable.addLeWidget(LeValue)
             editable.addLeWidget(LeSlider)
             editable.addLeWidget(LeTextField)
-            self.currently_selected_editablevbox = editable
 
             editable2 = self.mainlayout.addLeWidget(LeVBox)
             editable2.addLeWidget(LePyplot)
@@ -396,6 +410,8 @@ class LeGUIServer(object):
         app.exec_()
 
 
+    def get_currently_selected_layout(self):
+        return self.mainlayout.get_currently_selected_layout()
     
     def toggle_edit_mode(self):
         self.edit_mode_enabled = not self.edit_mode_enabled
@@ -412,7 +428,7 @@ class LeGUIServer(object):
             if message["typestr"] == "LeButton":
                 print("creating button from external request")
                 uid = message["uid"]
-                editable_button = self.currently_selected_editablevbox.addLeButton(uid)
+                editable_button = self.get_currently_selected_layout().addLeWidget(LeButton, uid=uid)
             
 
     def find_widget(self, name=None, idx=None, uid=None, type_=None):
@@ -461,12 +477,14 @@ class LeGUIServer(object):
         if widget is None:
             if uid is None:
                 uid = str(uuid.uuid4())
+                label = None
                 self.message_queue.append({"action": "create_lewidget", "typestr": widget_request["typestr"], "uid": uid})
             else:
                 is_found = False
         else:
             uid = widget.uid
-        response_dict = {"is_found": is_found, "uid": uid, "label": widget.get_label()}
+            label = widget.get_label()
+        response_dict = {"is_found": is_found, "uid": uid, "label": label}
         response_str = json.dumps(response_dict)
         return QuestionAnswerResponse(response_str)
 
