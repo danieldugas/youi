@@ -5,9 +5,9 @@ from youi import LeGUI
 G = LeGUI()
 
 # we can connect buttons to callbacks which are run immediately when the button is clicked.
-def do_something():
-    print("Click!")
-G.get_button(idx=0).on_click(do_something)
+# def do_something():
+#     print("Click!")
+# G.get_button(idx=0).on_click(do_something)
 
 sequence = []
 for i in range(100):
@@ -24,10 +24,10 @@ for i in range(100):
         print("button was clicked recently.")
 
     # gets the first axes created in the live GUI. (if they don't exist, creates an axes widget)
-    ax = G.get_axes(idx=0)
-    ax.plot(sequence)
+#     ax = G.get_axes(idx=0)
+#     ax.plot(sequence)
 
-    time.sleep(1.0)
+    time.sleep(0.5)
 
 
 

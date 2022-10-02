@@ -1,12 +1,9 @@
 # TODO: click to add button
-from plistlib import UID
 import sys
-from this import d
 import time
 import uuid
 import json
 from tkinter import Button
-from bson import UUID_SUBTYPE
 import matplotlib
 from matplotlib import widgets
 matplotlib.use('Qt5Agg')
@@ -21,12 +18,15 @@ from PyQt5.QtGui import QPalette, QColor
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
-import rospy
+HIBYE = True
+if HIBYE:
+    import hibye
+else:
+    import rospy
+    from common_srvs.srv import QuestionAnswer, QuestionAnswerResponse
 
-from common_srvs.srv import QuestionAnswer, QuestionAnswerResponse
 
 
-    
 class LeLayout(QWidget):
     DEPTH_COLORS = ["white", "gold", "cyan", "green", "black", "red"]
     """ An empty widget with vertical layout, can be right clicked to add objects inside """
@@ -62,7 +62,7 @@ class LeLayout(QWidget):
         if action == addPPlotAct:
             self.addLeWidget(LePyplot, uid=None)
         if action == addCheckboxAct:
-            self.addLeWidget(LeCheckBox, uid=None)
+            self.addLeWidget(LeToggle, uid=None)
         if action == addSliderAct:
             self.addLeWidget(LeSlider, uid=None)
         if action == addTextFieldAct:
@@ -102,7 +102,7 @@ class LeLayout(QWidget):
             palette = self.palette()
             palette.setColor(QPalette.Window, QColor(color))
             self.setPalette(palette)
-    
+
     def get_depth(self):
         return self.parent.get_depth() + 1
 
@@ -128,7 +128,7 @@ class LeMainLayout(LeLayout):
         self.parent = None
         self.leguiserver = leguiserver
         self.lewidgets = []
-        
+
         self.setLayout(QHBoxLayout())
         self.setAutoFillBackground(True)
         palette = self.palette()
@@ -165,7 +165,7 @@ class LeVBox(LeLayout):
         self.leguiserver = leguiserver
         self.setLayout(QVBoxLayout())
         self.lewidgets = []
-        
+
         self.set_label(label)
         self.labelwidget.setAlignment(QtCore.Qt.AlignCenter)
         self.set_color(LeLayout.DEPTH_COLORS[self.get_depth()])
@@ -178,10 +178,10 @@ class LeHBox(LeLayout):
         self.leguiserver = leguiserver
         self.setLayout(QHBoxLayout())
         self.lewidgets = []
-        
+
         print("New Layout, depth {}".format(self.get_depth()))
         self.set_label(label)
-        self.set_color(LeLayout.DEPTH_COLORS[self.get_depth()])    
+        self.set_color(LeLayout.DEPTH_COLORS[self.get_depth()])
 
 class LeWidget(object):
     def __init__(self, uid, label, parent, leguiserver):
@@ -204,7 +204,7 @@ class LeWidget(object):
             text, ok = QInputDialog.getText(self.get_qwidget(), 'Text Input Dialog', 'Enter new label:')
             if ok:
                 self.set_label(text)
-    
+
     def create_qwidget(self):
         raise NotImplementedError
 
@@ -251,7 +251,7 @@ class LePyplot(LeWidget):
 
     def get_qwidget(self):
         return self.qwidget
-    
+
     def get_label(self):
         return self.axes.get_title()
 
@@ -259,18 +259,22 @@ class LePyplot(LeWidget):
         self.axes.set_title(label)
 
 
-class LeCheckBox(LeWidget):
+class LeToggle(LeWidget):
     def create_qwidget(self):
         self.qwidget = QCheckBox()
 
     def get_qwidget(self):
         return self.qwidget
-    
+
     def get_label(self):
         return self.qwidget.text()
 
     def set_label(self, label):
         self.qwidget.setText(label)
+
+    def get_enabled_status(self):
+        status = self.qwidget.isChecked()
+        return status
 
 class LeValue(LeWidget):
     def create_qwidget(self):
@@ -284,7 +288,7 @@ class LeValue(LeWidget):
 
     def get_qwidget(self):
         return self.qwidget
-    
+
     def get_label(self):
         return self.labelqwidget.text()
 
@@ -320,7 +324,7 @@ class LeSlider(LeWidget):
 
     def get_qwidget(self):
         return self.qwidget
-    
+
     def get_label(self):
         return self.labelqwidget.text()
 
@@ -334,11 +338,11 @@ class LeSlider(LeWidget):
     def set_maximum(self, max):
         self.max = max
         self.show_max_qwidget.setText(str(max))
-    
+
     def set_n_ticks(self, n):
         self.n_ticks = n
         self.sliderqwidget.setMaximum(n)
-    
+
     def get_value(self):
         return self.sliderqwidget.value() * 1.0 / self.n_ticks * (self.max - self.min) + self.min
 
@@ -363,11 +367,14 @@ class LeTextField(LeWidget):
 
 class LeGUIServer(object):
     def __init__(self, path=None):
-        rospy.init_node('LeGUIServer')
+        if HIBYE:
+            self.service_server = hibye.ServiceServer(run_in_main_thread=True, verbose=True)
+        else:
+            rospy.init_node('LeGUIServer')
         self.all_editable_widgets = []
         self.message_queue = []
         self.edit_mode_enabled = False
-        
+
         # Create and populate main window
         app = QtWidgets.QApplication(sys.argv)
         self.mainwindow = QMainWindow()
@@ -389,7 +396,7 @@ class LeGUIServer(object):
             editable = self.mainlayout.addLeWidget(LeVBox)
             editable.addLeWidget(LeButton)
             editable.addLeWidget(LeButton)
-            editable.addLeWidget(LeCheckBox)
+            editable.addLeWidget(LeToggle)
             editable.addLeWidget(LeValue)
             editable.addLeWidget(LeSlider)
             editable.addLeWidget(LeTextField)
@@ -399,25 +406,32 @@ class LeGUIServer(object):
 
 
 
-        s = rospy.Service('get_widget', QuestionAnswer, self.get_widget_service_call)
-        s = rospy.Service('is_button_clicked', QuestionAnswer, self.is_button_clicked_service_call)
+        if HIBYE:
+            self.service_server.advertise("get_widget", self.get_widget_service_call)
+            self.service_server.advertise("is_button_clicked", self.is_button_clicked_service_call)
+            self.service_server.advertise("is_toggle_enabled", self.is_toggle_enabled_service_call)
+        else:
+            s = rospy.Service('get_widget', QuestionAnswer, self.get_widget_service_call)
+            s = rospy.Service('is_button_clicked', QuestionAnswer, self.is_button_clicked_service_call)
 
         # loop in main thread for checking incoming messages
         timer = QtCore.QTimer()
         timer.timeout.connect(self.check_messages)
-        timer.start(1000)
+        timer.start(500)
 
         app.exec_()
 
 
     def get_currently_selected_layout(self):
         return self.mainlayout.get_currently_selected_layout()
-    
+
     def toggle_edit_mode(self):
         self.edit_mode_enabled = not self.edit_mode_enabled
 
     def check_messages(self):
         print("checking")
+        if HIBYE:
+            self.service_server.run_once()
         if len(self.message_queue) > 0:
             message = self.message_queue.pop()
             self.handle(message)
@@ -429,7 +443,7 @@ class LeGUIServer(object):
                 print("creating button from external request")
                 uid = message["uid"]
                 editable_button = self.get_currently_selected_layout().addLeWidget(LeButton, uid=uid)
-            
+
 
     def find_widget(self, name=None, idx=None, uid=None, type_=None):
         count = 0
@@ -466,11 +480,17 @@ class LeGUIServer(object):
                 return None
 
     def get_widget_service_call(self, req):
-        widget_request = json.loads(req.question)
+        if HIBYE:
+            widget_request_str = req
+        else:
+            widget_request_str = req.question
+        widget_request = json.loads(widget_request_str)
         if widget_request["typestr"] == "LeButton":
             type_ = LeButton
+        elif widget_request["typestr"] == "LeToggle":
+            type_ = LeToggle
         else:
-            raise NotImplementedError
+            raise NotImplementedError("Requested widget of unknown type {}".format(widget_request["typestr"]))
         uid = widget_request["uid"]
         widget = self.find_widget(name=widget_request["name"], idx=widget_request["idx"], uid=uid, type_=type_)
         is_found = True
@@ -486,20 +506,46 @@ class LeGUIServer(object):
             label = widget.get_label()
         response_dict = {"is_found": is_found, "uid": uid, "label": label}
         response_str = json.dumps(response_dict)
-        return QuestionAnswerResponse(response_str)
+        if HIBYE:
+            resp = response_str
+        else:
+            resp = QuestionAnswerResponse(response_str)
+        return resp
 
     def is_button_clicked_service_call(self, req):
-        uid = req.question
-        button = self.wait_find_widget(uid=uid, type_=LeButton, timeout=3.)
-        if button is None:
-            print("Button with requested uid {} not found.".format(uid))
-            return QuestionAnswerResponse("not_found")
-        answer_string = "true" if button.get_click_status() else "false"
-        return QuestionAnswerResponse(answer_string)
-        
+        def predicate(button):
+            return button.get_click_status()
+        return self.is_widget_in_given_state_service_call(req, LeButton, predicate)
+
+    def is_toggle_enabled_service_call(self, req):
+        def predicate(toggle):
+            return toggle.get_enabled_status()
+        return self.is_widget_in_given_state_service_call(req, LeToggle, predicate)
+
+    def is_widget_in_given_state_service_call(self, req, widget_type, predicate):
+        """
+        req: the request string containing the widget uid
+        widget_type: type of widget (LeButton, etc)
+        predicate: a callable (function) which returns a boolean
+        """
+        if HIBYE:
+            uid = req
+        else:
+            uid = req.question
+        widget = self.wait_find_widget(uid=uid, type_=widget_type, timeout=3.)
+        if widget is None:
+            print("{} with requested uid {} not found.".format(widget_type, uid))
+            answer_string = "not_found"
+        else:
+            answer_string = "true" if predicate(widget) else "false"
+        if HIBYE:
+            resp = answer_string
+        else:
+            resp = QuestionAnswerResponse(answer_string)
+        return resp
+
 
 
 
 if __name__ == "__main__":
     LeGUIServer()
-    
